@@ -1,0 +1,185 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "nifi-registry.fullname" . }}
+  labels:
+    {{- include "nifi-registry.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "nifi-registry.fullname" . }}-headless
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "nifi-registry.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "nifi-registry.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "nifi-registry.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.nifiRegistry.properties }}
+      initContainers:
+        - name: config-setup
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /bin/bash
+            - -c
+            - |
+              echo "Setting up configuration files..."
+              # Copy all default configuration files first
+              cp -r /opt/nifi-registry/nifi-registry-current/conf/* /opt/nifi-registry/conf-writable/
+              # Override with our custom nifi-registry.properties
+              cp /opt/nifi-registry/config-template/nifi-registry.properties /opt/nifi-registry/conf-writable/nifi-registry.properties
+              chmod -R 644 /opt/nifi-registry/conf-writable/*
+              echo "Configuration setup complete"
+          volumeMounts:
+            - name: config
+              mountPath: /opt/nifi-registry/config-template
+            - name: config-storage
+              mountPath: /opt/nifi-registry/conf-writable
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+      {{- end }}
+      containers:
+        - name: nifi-registry
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.nifiRegistry.web.httpPort }}
+              protocol: TCP
+            {{- if .Values.security.enabled }}
+            - name: https
+              containerPort: {{ .Values.nifiRegistry.web.httpsPort }}
+              protocol: TCP
+            {{- end }}
+          env:
+            - name: NIFI_REGISTRY_WEB_HTTP_PORT
+              value: {{ .Values.nifiRegistry.web.httpPort | quote }}
+            {{- if .Values.security.enabled }}
+            - name: NIFI_REGISTRY_WEB_HTTPS_PORT
+              value: {{ .Values.nifiRegistry.web.httpsPort | quote }}
+            - name: KEYSTORE_PATH
+              value: "/opt/nifi-registry/nifi-registry-current/conf/keystore.jks"
+            - name: KEYSTORE_TYPE
+              value: {{ .Values.security.keystore.type | quote }}
+            - name: KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.security.keystore.passwordSecretName }}
+                  key: {{ .Values.security.keystore.passwordSecretKey }}
+            - name: TRUSTSTORE_PATH
+              value: "/opt/nifi-registry/nifi-registry-current/conf/truststore.jks"
+            - name: TRUSTSTORE_TYPE
+              value: {{ .Values.security.truststore.type | quote }}
+            - name: TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.security.truststore.passwordSecretName }}
+                  key: {{ .Values.security.truststore.passwordSecretKey }}
+            {{- end }}
+            - name: JVM_HEAP_SIZE
+              value: {{ .Values.nifiRegistry.jvm.heapSize | quote }}
+          livenessProbe:
+            httpGet:
+              path: /nifi-registry
+              port: {{- if .Values.security.enabled }} https {{- else }} http {{- end }}
+              scheme: {{ if .Values.security.enabled }}HTTPS{{ else }}HTTP{{ end }}
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /nifi-registry
+              port: {{- if .Values.security.enabled }} https {{- else }} http {{- end }}
+              scheme: {{ if .Values.security.enabled }}HTTPS{{ else }}HTTP{{ end }}
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /opt/nifi-registry/nifi-registry-current/database
+            {{- if .Values.nifiRegistry.properties }}
+            - name: config-storage
+              mountPath: /opt/nifi-registry/nifi-registry-current/conf
+            {{- end }}
+            {{- if .Values.security.enabled }}
+            {{- if .Values.security.keystore.secretName }}
+            - name: keystore
+              mountPath: /opt/nifi-registry/nifi-registry-current/conf/keystore.jks
+              subPath: {{ .Values.security.keystore.keystoreKey }}
+              readOnly: true
+            {{- end }}
+            {{- if .Values.security.truststore.secretName }}
+            - name: truststore
+              mountPath: /opt/nifi-registry/nifi-registry-current/conf/truststore.jks
+              subPath: {{ .Values.security.truststore.truststoreKey }}
+              readOnly: true
+            {{- end }}
+            {{- end }}
+      volumes:
+        {{- if .Values.nifiRegistry.properties }}
+        - name: config
+          configMap:
+            name: {{ include "nifi-registry.fullname" . }}
+        - name: config-storage
+          emptyDir: {}
+        {{- end }}
+        {{- if not .Values.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+        {{- if .Values.security.enabled }}
+        {{- if .Values.security.keystore.secretName }}
+        - name: keystore
+          secret:
+            secretName: {{ .Values.security.keystore.secretName }}
+        {{- end }}
+        {{- if .Values.security.truststore.secretName }}
+        - name: truststore
+          secret:
+            secretName: {{ .Values.security.truststore.secretName }}
+        {{- end }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- if .Values.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "nifi-registry.labels" . | nindent 10 }}
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        {{- if .Values.persistence.storageClass }}
+        storageClassName: {{ .Values.persistence.storageClass }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size }}
+  {{- end }}

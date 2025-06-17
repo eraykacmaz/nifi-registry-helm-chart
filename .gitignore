@@ -1,0 +1,37 @@
+# Helm chart .gitignore
+
+# SSL certificates and keys (regenerate these as needed)
+ssl-certs/*.jks
+ssl-certs/*.pem
+ssl-certs/*.key
+ssl-certs/*.crt
+
+# Temporary test files
+test-ssl-final.yaml
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Helm packaging
+*.tgz
+charts/
+
+# Kubernetes secrets and sensitive configs
+secrets/
+*.secret.yaml
+
+# Logs
+*.log 

@@ -1,0 +1,61 @@
+# Cursor Prompt: NiFi Registry 2.4.0 Simple Helm Chart
+
+## Context
+I'm developing a simplified, production-ready Helm chart for Apache NiFi Registry version 2.4.0. The chart uses a StatefulSet for persistent storage and includes keystore/truststore support for SSL/TLS.
+
+## Architecture
+- **StatefulSet**: For persistent storage and stable network identity
+- **Security**: Keystore and truststore support for SSL/TLS
+- **Storage**: Persistent volumes for registry data
+- **Configuration**: ConfigMap for NiFi Registry properties
+
+## Current Structure
+```
+nifi-registry/
+├── Chart.yaml
+├── values.yaml
+├── templates/
+│   ├── _helpers.tpl
+│   ├── statefulset.yaml
+│   ├── service.yaml (with headless service)
+│   └── configmap.yaml
+```
+
+## Key Features Implemented
+- ✅ StatefulSet with persistent storage
+- ✅ Keystore/truststore configuration
+- ✅ ConfigMap for nifi-registry.properties
+- ✅ Service and headless service
+- ✅ Security contexts and pod security
+- ✅ Health checks (liveness/readiness probes)
+
+## Additional Templates Needed
+Please help me create these remaining templates:
+
+1. **NOTES.txt** - Post-installation instructions
+2. **ingress.yaml** (optional) - For external access
+3. **serviceaccount.yaml** (optional) - If RBAC is needed
+
+## Security Configuration
+The chart supports:
+- SSL/TLS with custom keystore/truststore
+- Configurable security contexts
+- Secret references for keystore/truststore passwords
+- HTTP and HTTPS ports
+
+## Values Configuration Focus
+- Simple image configuration
+- StatefulSet replica management
+- Keystore/truststore secret references
+- Resource limits and requests
+- Persistence settings
+- Custom NiFi Registry properties
+
+## Best Practices Applied
+- Uses StatefulSet for persistent workloads
+- Proper label selectors and metadata
+- ConfigMap checksums for rolling updates
+- Health checks with appropriate timeouts
+- Security contexts for non-root execution
+
+Please provide any missing templates or improvements to existing ones, keeping the chart simple but production-ready.

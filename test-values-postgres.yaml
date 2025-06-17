@@ -1,0 +1,70 @@
+# Test configuration for NiFi Registry with PostgreSQL
+# This uses a PostgreSQL database instead of the default H2
+
+replicaCount: 1
+
+image:
+  repository: apache/nifi-registry
+  tag: "2.4.0"
+  pullPolicy: IfNotPresent
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 18080
+
+# Security disabled for testing
+security:
+  enabled: false
+
+# Persistence enabled for PostgreSQL testing
+persistence:
+  enabled: true
+  size: 1Gi
+
+# Resource limits for testing
+resources:
+  limits:
+    cpu: 500m
+    memory: 1Gi
+  requests:
+    cpu: 250m
+    memory: 512Mi
+
+# NiFi Registry configuration with PostgreSQL
+nifiRegistry:
+  web:
+    httpPort: 18080
+    httpsPort: 18443
+  jvm:
+    heapSize: "512m"
+  # Custom properties for PostgreSQL
+  properties:
+    # Database configuration
+    "nifi.registry.db.url": "jdbc:postgresql://postgres.postgres-test.svc.cluster.local:5432/nifiregistry"
+    "nifi.registry.db.driver.class": "org.postgresql.Driver"
+    "nifi.registry.db.username": "nifiregistry"
+    "nifi.registry.db.password": "nifiregistry"
+    "nifi.registry.db.driver.directory": ""
+
+# Pod security context
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  runAsNonRoot: true
+  runAsUser: 1000
+
+# ServiceAccount
+serviceAccount:
+  create: true
+
+# Ingress disabled
+ingress:
+  enabled: false 

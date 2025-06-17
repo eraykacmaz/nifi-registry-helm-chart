@@ -1,0 +1,49 @@
+{{- $fullName := include "nifi-registry.fullname" . -}}
+{{- $namespace := .Release.Namespace -}}
+{{- $servicePort := .Values.service.port -}}
+{{- $httpsPort := .Values.nifiRegistry.web.httpsPort -}}
+
+Apache NiFi Registry has been deployed.
+
+Get the application URL by running these commands:
+{{- if .Values.ingress.enabled }}
+{{- range $host := .Values.ingress.hosts }}
+  {{- range $path := $host.paths }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}{{ $path.path }}
+  {{- end }}
+{{- end }}
+{{- else if contains "LoadBalancer" .Values.service.type }}
+  NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+        You can watch the status by running 'kubectl get svc --namespace {{ $namespace }} -w {{ $fullName }}'
+
+  export SERVICE_IP=$(kubectl get svc --namespace {{ $namespace }} {{ $fullName }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+  {{- if .Values.security.enabled }}
+  echo "https://$SERVICE_IP:{{ $httpsPort }}/nifi-registry"
+  {{- else }}
+  echo "http://$SERVICE_IP:{{ $servicePort }}/nifi-registry"
+  {{- end }}
+{{- else if contains "NodePort" .Values.service.type }}
+  export NODE_PORT=$(kubectl get svc --namespace {{ $namespace }} {{ $fullName }} -o jsonpath='{.spec.ports[?(@.name=="{{ if .Values.security.enabled }}https{{ else }}http{{ end }}")].nodePort}')
+  export NODE_IP=$(kubectl get nodes --namespace {{ $namespace }} -o jsonpath='{.items[0].status.addresses[?(@.type=="ExternalIP")].address}')
+  if [ -z "$NODE_IP" ]; then
+    NODE_IP=$(kubectl get nodes --namespace {{ $namespace }} -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+  fi
+  {{- if .Values.security.enabled }}
+  echo "https://$NODE_IP:$NODE_PORT/nifi-registry"
+  {{- else }}
+  echo "http://$NODE_IP:$NODE_PORT/nifi-registry"
+  {{- end }}
+{{- else if contains "ClusterIP" .Values.service.type }}
+  echo "NiFi Registry is only reachable from within the cluster."
+  echo "To access it from your local machine, run:"
+  echo ""
+  {{- if .Values.security.enabled }}
+  echo "  kubectl port-forward --namespace {{ $namespace }} svc/{{ $fullName }} {{ $httpsPort }}:{{ $httpsPort }}"
+  echo ""
+  echo "Then open https://127.0.0.1:{{ $httpsPort }}/nifi-registry in your browser."
+  {{- else }}
+  echo "  kubectl port-forward --namespace {{ $namespace }} svc/{{ $fullName }} {{ $servicePort }}:{{ $servicePort }}"
+  echo ""
+  echo "Then open http://127.0.0.1:{{ $servicePort }}/nifi-registry in your browser."
+  {{- end }}
+{{- end }}
