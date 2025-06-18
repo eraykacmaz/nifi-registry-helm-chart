@@ -1,0 +1,42 @@
+# OIDC + HTTPS test configuration
+# This configuration enables both HTTPS and OIDC authentication
+
+# Security settings (HTTPS enabled by default)
+security:
+  enabled: true
+  certificates:
+    strategy: auto  # Use auto-generated certificates for testing
+
+# OIDC Configuration - ENABLED
+oidc:
+  enabled: true
+  # Example configuration for testing
+  # In real deployment, replace with your OIDC provider details
+  discoveryUrl: "https://accounts.google.com/.well-known/openid_configuration"
+  clientId: "your-client-id.apps.googleusercontent.com"
+  clientSecret: "your-client-secret"
+  # Additional OIDC settings
+  additionalScopes: "email,profile"
+  claimIdentifyingUser: "email"
+  
+# Use H2 database for simplicity
+database:
+  type: h2
+
+# Smaller resources for testing
+resources:
+  limits:
+    cpu: 500m
+    memory: 1Gi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+# Smaller storage for testing
+persistence:
+  enabled: true
+  size: 1Gi
+
+# Service configuration
+service:
+  type: NodePort 
