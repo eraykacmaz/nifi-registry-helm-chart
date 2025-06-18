@@ -1,0 +1,168 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "nifi-registry.fullname" . }}-scripts
+  labels:
+    {{- include "nifi-registry.labels" . | nindent 4 }}
+data:
+  start.sh: |
+    #!/bin/bash
+    set -e
+    
+    echo "Starting NiFi Registry configuration setup..."
+    
+    # Ensure configuration directory exists
+    mkdir -p /opt/nifi-registry/nifi-registry-current/conf
+    
+    # Copy default configuration files if they don't exist
+    if [ ! -f /opt/nifi-registry/nifi-registry-current/conf/nifi-registry.properties ]; then
+        echo "Copying default configuration files..."
+        cp -r /opt/nifi-registry/nifi-registry-current/conf-default/* /opt/nifi-registry/nifi-registry-current/conf/ || true
+    fi
+    
+    # Configuration file path
+    PROPS_FILE="/opt/nifi-registry/nifi-registry-current/conf/nifi-registry.properties"
+    
+    echo "Configuring NiFi Registry properties..."
+    
+    # Function to set or update a property
+    set_property() {
+        local key="$1"
+        local value="$2"
+        local file="$3"
+        
+        if grep -q "^${key}=" "$file"; then
+            # Property exists, update it
+            sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+        else
+            # Property doesn't exist, append it
+            echo "${key}=${value}" >> "$file"
+        fi
+    }
+    
+    # Web configuration
+    {{- if .Values.security.enabled }}
+    echo "Configuring HTTPS (SSL enabled)..."
+    set_property "nifi.registry.web.http.host" "" "$PROPS_FILE"
+    set_property "nifi.registry.web.http.port" "" "$PROPS_FILE"
+    set_property "nifi.registry.web.https.host" "${NIFI_REGISTRY_WEB_HTTPS_HOST:-}" "$PROPS_FILE"
+    set_property "nifi.registry.web.https.port" "${NIFI_REGISTRY_WEB_HTTPS_PORT:-18443}" "$PROPS_FILE"
+    set_property "nifi.registry.web.https.network.interface.default" "" "$PROPS_FILE"
+    set_property "nifi.registry.web.https.application.protocols" "http/1.1" "$PROPS_FILE"
+    {{- else }}
+    echo "Configuring HTTP (SSL disabled)..."
+    set_property "nifi.registry.web.http.host" "${NIFI_REGISTRY_WEB_HTTP_HOST:-}" "$PROPS_FILE"
+    set_property "nifi.registry.web.http.port" "${NIFI_REGISTRY_WEB_HTTP_PORT:-18080}" "$PROPS_FILE"
+    set_property "nifi.registry.web.https.host" "" "$PROPS_FILE"
+    set_property "nifi.registry.web.https.port" "" "$PROPS_FILE"
+    {{- end }}
+    
+    # SSL/TLS Configuration
+    {{- if .Values.security.enabled }}
+    echo "Configuring SSL/TLS..."
+    set_property "nifi.registry.security.keystore" "/opt/nifi-registry/certs/{{ .Values.security.keystore.keystoreKey }}" "$PROPS_FILE"
+    set_property "nifi.registry.security.keystoreType" "{{ .Values.security.keystore.type }}" "$PROPS_FILE"
+    set_property "nifi.registry.security.keystorePasswd" "${KEYSTORE_PASSWORD:-{{ .Values.security.keystore.password }}}" "$PROPS_FILE"
+    set_property "nifi.registry.security.keyPasswd" "${KEY_PASSWORD:-{{ .Values.security.keystore.password }}}" "$PROPS_FILE"
+    set_property "nifi.registry.security.truststore" "/opt/nifi-registry/certs/{{ .Values.security.truststore.truststoreKey }}" "$PROPS_FILE"
+    set_property "nifi.registry.security.truststoreType" "{{ .Values.security.truststore.type }}" "$PROPS_FILE"
+    set_property "nifi.registry.security.truststorePasswd" "${TRUSTSTORE_PASSWORD:-{{ .Values.security.truststore.password }}}" "$PROPS_FILE"
+    set_property "nifi.registry.security.needClientAuth" "false" "$PROPS_FILE"
+    set_property "nifi.registry.security.authorizers.configuration.file" "./conf/authorizers.xml" "$PROPS_FILE"
+    set_property "nifi.registry.security.authorizer" "managed-authorizer" "$PROPS_FILE"
+    set_property "nifi.registry.security.identity.providers.configuration.file" "./conf/identity-providers.xml" "$PROPS_FILE"
+    set_property "nifi.registry.security.identity.provider" "" "$PROPS_FILE"
+    {{- else }}
+    echo "Configuring without SSL/TLS..."
+    set_property "nifi.registry.security.keystore" "" "$PROPS_FILE"
+    set_property "nifi.registry.security.keystoreType" "" "$PROPS_FILE"
+    set_property "nifi.registry.security.keystorePasswd" "" "$PROPS_FILE"
+    set_property "nifi.registry.security.keyPasswd" "" "$PROPS_FILE"
+    set_property "nifi.registry.security.truststore" "" "$PROPS_FILE"
+    set_property "nifi.registry.security.truststoreType" "" "$PROPS_FILE"
+    set_property "nifi.registry.security.truststorePasswd" "" "$PROPS_FILE"
+    set_property "nifi.registry.security.needClientAuth" "" "$PROPS_FILE"
+    set_property "nifi.registry.security.authorizers.configuration.file" "./conf/authorizers.xml" "$PROPS_FILE"
+    set_property "nifi.registry.security.authorizer" "" "$PROPS_FILE"
+    set_property "nifi.registry.security.identity.providers.configuration.file" "./conf/identity-providers.xml" "$PROPS_FILE"
+    set_property "nifi.registry.security.identity.provider" "" "$PROPS_FILE"
+    {{- end }}
+    
+    # OIDC Configuration
+    {{- if and .Values.security.enabled .Values.oidc.enabled }}
+    echo "Configuring OIDC authentication..."
+    set_property "nifi.registry.security.user.oidc.discovery.url" "${OIDC_DISCOVERY_URL:-{{ .Values.oidc.discoveryUrl }}}" "$PROPS_FILE"
+    set_property "nifi.registry.security.user.oidc.connect.timeout" "{{ .Values.oidc.connectTimeout }}" "$PROPS_FILE"
+    set_property "nifi.registry.security.user.oidc.read.timeout" "{{ .Values.oidc.readTimeout }}" "$PROPS_FILE"
+    set_property "nifi.registry.security.user.oidc.client.id" "${OIDC_CLIENT_ID:-{{ .Values.oidc.clientId }}}" "$PROPS_FILE"
+    set_property "nifi.registry.security.user.oidc.client.secret" "${OIDC_CLIENT_SECRET:-{{ .Values.oidc.clientSecret }}}" "$PROPS_FILE"
+    set_property "nifi.registry.security.user.oidc.preferred.jwsalgorithm" "{{ .Values.oidc.preferredJwsAlgorithm }}" "$PROPS_FILE"
+    set_property "nifi.registry.security.user.oidc.additional.scopes" "{{ .Values.oidc.additionalScopes }}" "$PROPS_FILE"
+    set_property "nifi.registry.security.user.oidc.claim.identifying.user" "{{ .Values.oidc.claimIdentifyingUser }}" "$PROPS_FILE"
+    set_property "nifi.registry.security.user.oidc.fallback.claims.identifying.user" "{{ .Values.oidc.fallbackClaimsIdentifyingUser }}" "$PROPS_FILE"
+    {{- else }}
+    echo "OIDC authentication disabled..."
+    set_property "nifi.registry.security.user.oidc.discovery.url" "" "$PROPS_FILE"
+    set_property "nifi.registry.security.user.oidc.connect.timeout" "5 secs" "$PROPS_FILE"
+    set_property "nifi.registry.security.user.oidc.read.timeout" "5 secs" "$PROPS_FILE"
+    set_property "nifi.registry.security.user.oidc.client.id" "" "$PROPS_FILE"
+    set_property "nifi.registry.security.user.oidc.client.secret" "" "$PROPS_FILE"
+    set_property "nifi.registry.security.user.oidc.preferred.jwsalgorithm" "" "$PROPS_FILE"
+    set_property "nifi.registry.security.user.oidc.additional.scopes" "" "$PROPS_FILE"
+    set_property "nifi.registry.security.user.oidc.claim.identifying.user" "" "$PROPS_FILE"
+    set_property "nifi.registry.security.user.oidc.fallback.claims.identifying.user" "" "$PROPS_FILE"
+    {{- end }}
+    
+    # Database Configuration
+    {{- if eq .Values.database.type "postgresql" }}
+    echo "Configuring PostgreSQL database..."
+    set_property "nifi.registry.db.url" "jdbc:postgresql://${DB_HOST:-{{ .Values.database.postgresql.host }}}:${DB_PORT:-{{ .Values.database.postgresql.port }}}/${DB_NAME:-{{ .Values.database.postgresql.database }}}" "$PROPS_FILE"
+    set_property "nifi.registry.db.driver.class" "org.postgresql.Driver" "$PROPS_FILE"
+    set_property "nifi.registry.db.username" "${DB_USERNAME:-{{ .Values.database.postgresql.username }}}" "$PROPS_FILE"
+    set_property "nifi.registry.db.password" "${DB_PASSWORD:-{{ .Values.database.postgresql.password }}}" "$PROPS_FILE"
+    set_property "nifi.registry.db.maxConnections" "${DB_MAX_CONNECTIONS:-{{ .Values.database.postgresql.maxConnections }}}" "$PROPS_FILE"
+    {{- else if eq .Values.database.type "mysql" }}
+    echo "Configuring MySQL database..."
+    set_property "nifi.registry.db.url" "jdbc:mysql://${DB_HOST:-{{ .Values.database.mysql.host }}}:${DB_PORT:-{{ .Values.database.mysql.port }}}/${DB_NAME:-{{ .Values.database.mysql.database }}}" "$PROPS_FILE"
+    set_property "nifi.registry.db.driver.class" "com.mysql.cj.jdbc.Driver" "$PROPS_FILE"
+    set_property "nifi.registry.db.username" "${DB_USERNAME:-{{ .Values.database.mysql.username }}}" "$PROPS_FILE"
+    set_property "nifi.registry.db.password" "${DB_PASSWORD:-{{ .Values.database.mysql.password }}}" "$PROPS_FILE"
+    set_property "nifi.registry.db.maxConnections" "${DB_MAX_CONNECTIONS:-{{ .Values.database.mysql.maxConnections }}}" "$PROPS_FILE"
+    {{- else }}
+    echo "Configuring H2 database (default)..."
+    set_property "nifi.registry.db.url" "jdbc:h2:./database/nifi-registry-primary;AUTOCOMMIT=OFF;DB_CLOSE_ON_EXIT=FALSE;LOCK_MODE=3;LOCK_TIMEOUT=25000;WRITE_DELAY=0;AUTO_SERVER=FALSE" "$PROPS_FILE"
+    set_property "nifi.registry.db.driver.class" "org.h2.Driver" "$PROPS_FILE"
+    set_property "nifi.registry.db.username" "nifireg" "$PROPS_FILE"
+    set_property "nifi.registry.db.password" "nifireg" "$PROPS_FILE"
+    set_property "nifi.registry.db.maxConnections" "5" "$PROPS_FILE"
+    {{- end }}
+    
+    set_property "nifi.registry.db.driver.directory" "" "$PROPS_FILE"
+    set_property "nifi.registry.db.sql.debug" "false" "$PROPS_FILE"
+    
+    # Other standard properties
+    set_property "nifi.registry.web.war.directory" "./lib" "$PROPS_FILE"
+    set_property "nifi.registry.web.jetty.working.directory" "./work/jetty" "$PROPS_FILE"
+    set_property "nifi.registry.web.jetty.threads" "200" "$PROPS_FILE"
+    set_property "nifi.registry.web.should.send.server.version" "true" "$PROPS_FILE"
+    set_property "nifi.registry.providers.configuration.file" "./conf/providers.xml" "$PROPS_FILE"
+    set_property "nifi.registry.registry.alias.default" "" "$PROPS_FILE"
+    set_property "nifi.registry.extensions.working.directory" "./work/extensions" "$PROPS_FILE"
+    set_property "nifi.registry.db.directory" "" "$PROPS_FILE"
+    set_property "nifi.registry.db.url.append" "" "$PROPS_FILE"
+    set_property "nifi.registry.extension.dir.aws" "./ext/aws/lib" "$PROPS_FILE"
+    set_property "nifi.registry.revisions.enabled" "false" "$PROPS_FILE"
+    
+    # Kerberos properties
+    set_property "nifi.registry.kerberos.krb5.file" "" "$PROPS_FILE"
+    set_property "nifi.registry.kerberos.spnego.principal" "" "$PROPS_FILE"
+    set_property "nifi.registry.kerberos.spnego.keytab.location" "" "$PROPS_FILE"
+    set_property "nifi.registry.kerberos.spnego.authentication.expiration" "12 hours" "$PROPS_FILE"
+    
+    echo "Configuration complete. Starting NiFi Registry..."
+    
+    # Set JVM heap size
+    export NIFI_REGISTRY_JVM_HEAP_SIZE="${NIFI_REGISTRY_JVM_HEAP_SIZE:-{{ .Values.nifiRegistry.jvm.heapSize }}}"
+    
+    # Start NiFi Registry
+    exec /opt/nifi-registry/nifi-registry-current/bin/nifi-registry.sh run 

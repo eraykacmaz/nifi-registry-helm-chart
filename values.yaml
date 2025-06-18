@@ -3,7 +3,7 @@
 ## Image configuration
 image:
   repository: apache/nifi-registry
-  tag: "2.4.0"
+  tag: ""
   pullPolicy: IfNotPresent
 
 ## StatefulSet configuration
@@ -12,7 +12,7 @@ replicaCount: 1
 ## Service configuration
 service:
   type: ClusterIP
-  port: 18080
+  port: 18443
   annotations: {}
 
 ## Ingress configuration
@@ -23,10 +23,10 @@ ingress:
     # kubernetes.io/ingress.class: nginx
     # kubernetes.io/tls-acme: "true"
   hosts:
-    - host: chart-example.local
+    - host: nifi-registry.local
       paths:
         - path: /
-          pathType: ImplementationSpecific
+          pathType: Prefix
   tls: []
   #  - secretName: chart-example-tls
   #    hosts:
@@ -36,6 +36,8 @@ ingress:
 serviceAccount:
   # Specifies whether a service account should be created
   create: true
+  # Automatically mount a ServiceAccount's API credentials?
+  automount: true
   # Annotations to add to the service account
   annotations: {}
   # The name of the service account to use.
@@ -45,7 +47,7 @@ serviceAccount:
 ## Resource configuration
 resources:
   limits:
-    cpu: 1000m
+    cpu: 1
     memory: 2Gi
   requests:
     cpu: 500m
@@ -54,43 +56,48 @@ resources:
 ## Persistence configuration
 persistence:
   enabled: true
-  storageClass: ""
-  size: 10Gi
+  accessMode: ReadWriteOnce
+  size: 8Gi
 
 ## Security configuration with keystore/truststore
 security:
   # Enable SSL/TLS
-  enabled: false
+  enabled: true
+  
+  # Certificate management
+  certificates:
+    # Strategy: auto, cert-manager, or manual
+    # auto: Generate self-signed certificates automatically
+    # cert-manager: Use cert-manager to generate certificates
+    # manual: Use manually provided certificates
+    strategy: auto
+    # For cert-manager strategy
+    certManager:
+      issuerRef:
+        name: selfsigned-issuer
+        kind: ClusterIssuer
+    # For manual strategy
+    manual:
+      keystoreSecret: ""
+      truststoreSecret: ""
   
   # Keystore configuration
   keystore:
-    # Secret name containing the keystore file
-    secretName: ""
-    # Key in the secret containing the keystore data
-    keystoreKey: "keystore.jks"
-    # Password for the keystore
-    passwordSecretName: ""
-    passwordSecretKey: "keystore-password"
-    # Keystore type (JKS, PKCS12)
-    type: "JKS"
-    
+    type: JKS
+    keystoreKey: keystore.jks
+    password: changeit
+  
   # Truststore configuration  
   truststore:
-    # Secret name containing the truststore file
-    secretName: ""
-    # Key in the secret containing the truststore data
-    truststoreKey: "truststore.jks"
-    # Password for the truststore
-    passwordSecretName: ""
-    passwordSecretKey: "truststore-password"
-    # Truststore type (JKS, PKCS12)
-    type: "JKS"
+    type: JKS
+    truststoreKey: truststore.jks
+    password: changeit
 
 ## NiFi Registry configuration
 nifiRegistry:
   # Web properties
   web:
-    httpPort: 18080
+    httpPort: ""
     httpsPort: 18443
     
   # JVM settings
@@ -122,3 +129,53 @@ securityContext:
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+## OIDC Authentication
+oidc:
+  enabled: true
+  # OIDC Provider configuration
+  discoveryUrl: ""  # Must be provided for production use
+  clientId: "nifi-registry"
+  clientSecret: ""  # Must be provided for production use
+  
+  # Additional OIDC configuration
+  connectTimeout: "5 secs"
+  readTimeout: "5 secs"
+  preferredJwsAlgorithm: ""
+  additionalScopes: ""
+  claimIdentifyingUser: "email"
+  fallbackClaimsIdentifyingUser: "sub"
+
+## Database configuration
+database:
+  # Type: h2, postgresql, mysql
+  type: h2
+  
+  # H2 configuration (default)
+  h2:
+    # For embedded H2, no additional configuration needed
+    
+  # PostgreSQL configuration
+  postgresql:
+    host: "localhost"
+    port: 5432
+    database: "nifi_registry"
+    username: "nifi_user"
+    password: "nifi_password"
+    maxConnections: 10
+    
+  # MySQL configuration
+  mysql:
+    host: "localhost"
+    port: 3306
+    database: "nifi_registry"
+    username: "nifi_user" 
+    password: "nifi_password"
+    maxConnections: 10
+
+## Environment variables for runtime configuration
+environment:
+  # These will be used by the startup script to configure NiFi Registry
+  # Database environment variables will be set based on database.type
+  NIFI_REGISTRY_WEB_HTTPS_HOST: ""
+  NIFI_REGISTRY_WEB_HTTPS_PORT: "18443"

@@ -1,8 +1,8 @@
 apiVersion: v2
 name: nifi-registry
-description: A Helm chart for Apache NiFi Registry - A centralized storage & management solution for versioned flows
+description: A Helm chart for Apache NiFi Registry with HTTPS and OIDC authentication by default
 type: application
-version: 1.0.0
+version: 2.0.0
 appVersion: "2.4.0"
 home: https://nifi.apache.org/registry
 sources:
@@ -13,6 +13,22 @@ keywords:
   - dataflow
   - apache
   - workflow
+  - secure
+  - oidc
+  - https
+maintainers:
+  - name: NiFi Registry Helm Chart Team
 annotations:
   category: Analytics
   license: Apache-2.0
+  artifacthub.io/changes: |
+    - kind: breaking
+      description: "HTTPS enabled by default with auto-generated certificates"
+    - kind: added
+      description: "OIDC authentication enabled by default"
+    - kind: added
+      description: "Multiple certificate management strategies (auto, cert-manager, manual)"
+    - kind: added
+      description: "Script-based configuration approach"
+    - kind: changed
+      description: "Removed property file mounting in favor of dynamic configuration"

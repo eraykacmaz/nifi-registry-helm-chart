@@ -1,0 +1,55 @@
+# Test values for secure HTTPS + OIDC deployment
+# This demonstrates the new security-first approach
+
+# Security is enabled by default - this is the new default behavior
+security:
+  enabled: true
+  certificates:
+    strategy: auto  # Auto-generate self-signed certificates
+    
+# OIDC is enabled by default but needs configuration
+oidc:
+  enabled: true
+  discoveryUrl: "https://your-oidc-provider.com/.well-known/openid_configuration"
+  clientId: "nifi-registry"
+  clientSecret: "your-client-secret"
+  claimIdentifyingUser: "email"
+
+# Database configuration
+database:
+  type: h2  # Simple H2 for testing
+
+# Service configuration 
+service:
+  type: NodePort  # For easy testing
+
+# Enable ingress for external access
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+  hosts:
+    - host: nifi-registry.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: nifi-registry-tls
+      hosts:
+        - nifi-registry.local
+
+# Resources for testing
+resources:
+  limits:
+    cpu: 500m
+    memory: 1Gi
+  requests:
+    cpu: 250m
+    memory: 512Mi
+
+# Persistence
+persistence:
+  enabled: true
+  size: 4Gi 

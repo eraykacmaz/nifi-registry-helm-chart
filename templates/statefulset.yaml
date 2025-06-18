@@ -5,155 +5,302 @@ metadata:
   labels:
     {{- include "nifi-registry.labels" . | nindent 4 }}
 spec:
-  serviceName: {{ include "nifi-registry.fullname" . }}-headless
   replicas: {{ .Values.replicaCount }}
+  serviceName: {{ include "nifi-registry.fullname" . }}-headless
   selector:
     matchLabels:
       {{- include "nifi-registry.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       annotations:
-        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/config: {{ include (print $.Template.BasePath "/configmap-scripts.yaml") . | sha256sum }}
+        {{- if and .Values.security.enabled .Values.oidc.enabled }}
+        checksum/authorizers: {{ include (print $.Template.BasePath "/configmap-authorizers.yaml") . | sha256sum }}
+        {{- end }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
       labels:
-        {{- include "nifi-registry.selectorLabels" . | nindent 8 }}
+        {{- include "nifi-registry.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       serviceAccountName: {{ include "nifi-registry.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      {{- if .Values.nifiRegistry.properties }}
+      {{- if .Values.security.enabled }}
       initContainers:
-        - name: config-setup
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        - name: cert-setup
+          image: openjdk:11-jre-slim
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command:
             - /bin/bash
             - -c
             - |
-              echo "Setting up configuration files..."
-              # Copy all default configuration files first
-              cp -r /opt/nifi-registry/nifi-registry-current/conf/* /opt/nifi-registry/conf-writable/
-              # Override with our custom nifi-registry.properties
-              cp /opt/nifi-registry/config-template/nifi-registry.properties /opt/nifi-registry/conf-writable/nifi-registry.properties
-              chmod -R 644 /opt/nifi-registry/conf-writable/*
-              echo "Configuration setup complete"
+              echo "Setting up certificates..."
+              mkdir -p /opt/nifi-registry/certs
+              
+              {{- if eq .Values.security.certificates.strategy "auto" }}
+              # Generate self-signed certificates directly
+              echo "Generating self-signed certificates..."
+              
+              # Install OpenSSL
+              apt-get update && apt-get install -y openssl
+              
+              # Generate private key
+              openssl genrsa -out /tmp/nifi-registry.key 2048
+              
+              # Generate certificate signing request
+              openssl req -new -key /tmp/nifi-registry.key -out /tmp/nifi-registry.csr \
+                -subj "/C=US/ST=CA/L=San Francisco/O=NiFi Registry/OU=IT/CN={{ include "nifi-registry.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local"
+              
+              # Generate self-signed certificate with SAN
+              cat > /tmp/cert.conf <<EOF
+              [req]
+              distinguished_name = req_distinguished_name
+              req_extensions = v3_req
+              prompt = no
+              
+              [req_distinguished_name]
+              C = US
+              ST = CA
+              L = San Francisco
+              O = NiFi Registry
+              OU = IT
+              CN = {{ include "nifi-registry.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local
+              
+              [v3_req]
+              keyUsage = keyEncipherment, dataEncipherment
+              extendedKeyUsage = serverAuth
+              subjectAltName = @alt_names
+              
+              [alt_names]
+              DNS.1 = {{ include "nifi-registry.fullname" . }}
+              DNS.2 = {{ include "nifi-registry.fullname" . }}.{{ .Release.Namespace }}
+              DNS.3 = {{ include "nifi-registry.fullname" . }}.{{ .Release.Namespace }}.svc
+              DNS.4 = {{ include "nifi-registry.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local
+              DNS.5 = localhost
+              IP.1 = 127.0.0.1
+              EOF
+              
+              # Generate self-signed certificate
+              openssl x509 -req -days 365 -in /tmp/nifi-registry.csr -signkey /tmp/nifi-registry.key \
+                -out /tmp/nifi-registry.crt -extensions v3_req -extfile /tmp/cert.conf
+              
+              # Create PKCS12 keystore
+              openssl pkcs12 -export -in /tmp/nifi-registry.crt -inkey /tmp/nifi-registry.key \
+                -out /tmp/keystore.p12 -name nifi-registry -password pass:{{ .Values.security.keystore.password }}
+              
+              # Convert PKCS12 to JKS keystore
+              keytool -importkeystore -srckeystore /tmp/keystore.p12 -srcstoretype PKCS12 \
+                -destkeystore /opt/nifi-registry/certs/{{ .Values.security.keystore.keystoreKey }} -deststoretype JKS \
+                -srcstorepass {{ .Values.security.keystore.password }} -deststorepass {{ .Values.security.keystore.password }} \
+                -noprompt
+              
+              # Create truststore and import certificate
+              keytool -import -alias nifi-registry -file /tmp/nifi-registry.crt \
+                -keystore /opt/nifi-registry/certs/{{ .Values.security.truststore.truststoreKey }} -storepass {{ .Values.security.truststore.password }} \
+                -noprompt
+              
+              echo "Self-signed certificates generated successfully"
+              {{- else if eq .Values.security.certificates.strategy "manual" }}
+              # Copy manually provided certificates
+              if [ -f /tmp/keystore/{{ .Values.security.keystore.keystoreKey }} ]; then
+                cp /tmp/keystore/{{ .Values.security.keystore.keystoreKey }} /opt/nifi-registry/certs/
+              fi
+              if [ -f /tmp/truststore/{{ .Values.security.truststore.truststoreKey }} ]; then
+                cp /tmp/truststore/{{ .Values.security.truststore.truststoreKey }} /opt/nifi-registry/certs/
+              fi
+              echo "Manual certificates copied successfully"
+              {{- end }}
+              
+              chmod 644 /opt/nifi-registry/certs/*
+              ls -la /opt/nifi-registry/certs/
           volumeMounts:
-            - name: config
-              mountPath: /opt/nifi-registry/config-template
-            - name: config-storage
-              mountPath: /opt/nifi-registry/conf-writable
+            - name: cert-storage
+              mountPath: /opt/nifi-registry/certs
+            {{- if eq .Values.security.certificates.strategy "manual" }}
+            {{- if .Values.security.certificates.manual.keystoreSecret }}
+            - name: manual-keystore
+              mountPath: /tmp/keystore
+            {{- end }}
+            {{- if .Values.security.certificates.manual.truststoreSecret }}
+            - name: manual-truststore
+              mountPath: /tmp/truststore
+            {{- end }}
+            {{- end }}
           securityContext:
             runAsUser: 1000
             runAsGroup: 1000
       {{- end }}
       containers:
-        - name: nifi-registry
+        - name: {{ .Chart.Name }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/scripts/start.sh"]
           ports:
-            - name: http
-              containerPort: {{ .Values.nifiRegistry.web.httpPort }}
-              protocol: TCP
             {{- if .Values.security.enabled }}
             - name: https
               containerPort: {{ .Values.nifiRegistry.web.httpsPort }}
               protocol: TCP
+            {{- else }}
+            - name: http
+              containerPort: {{ .Values.nifiRegistry.web.httpPort | default 18080 }}
+              protocol: TCP
             {{- end }}
           env:
-            - name: NIFI_REGISTRY_WEB_HTTP_PORT
-              value: {{ .Values.nifiRegistry.web.httpPort | quote }}
-            {{- if .Values.security.enabled }}
-            - name: NIFI_REGISTRY_WEB_HTTPS_PORT
-              value: {{ .Values.nifiRegistry.web.httpsPort | quote }}
-            - name: KEYSTORE_PATH
-              value: "/opt/nifi-registry/nifi-registry-current/conf/keystore.jks"
-            - name: KEYSTORE_TYPE
-              value: {{ .Values.security.keystore.type | quote }}
-            - name: KEYSTORE_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.security.keystore.passwordSecretName }}
-                  key: {{ .Values.security.keystore.passwordSecretKey }}
-            - name: TRUSTSTORE_PATH
-              value: "/opt/nifi-registry/nifi-registry-current/conf/truststore.jks"
-            - name: TRUSTSTORE_TYPE
-              value: {{ .Values.security.truststore.type | quote }}
-            - name: TRUSTSTORE_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.security.truststore.passwordSecretName }}
-                  key: {{ .Values.security.truststore.passwordSecretKey }}
+            # Environment variables for configuration
+            {{- range $key, $value := .Values.environment }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
             {{- end }}
-            - name: JVM_HEAP_SIZE
+            
+            # Database configuration
+            {{- if eq .Values.database.type "postgresql" }}
+            - name: DB_HOST
+              value: {{ .Values.database.postgresql.host | quote }}
+            - name: DB_PORT
+              value: {{ .Values.database.postgresql.port | quote }}
+            - name: DB_NAME
+              value: {{ .Values.database.postgresql.database | quote }}
+            - name: DB_USERNAME
+              value: {{ .Values.database.postgresql.username | quote }}
+            - name: DB_PASSWORD
+              value: {{ .Values.database.postgresql.password | quote }}
+            - name: DB_MAX_CONNECTIONS
+              value: {{ .Values.database.postgresql.maxConnections | quote }}
+            {{- else if eq .Values.database.type "mysql" }}
+            - name: DB_HOST
+              value: {{ .Values.database.mysql.host | quote }}
+            - name: DB_PORT
+              value: {{ .Values.database.mysql.port | quote }}
+            - name: DB_NAME
+              value: {{ .Values.database.mysql.database | quote }}
+            - name: DB_USERNAME
+              value: {{ .Values.database.mysql.username | quote }}
+            - name: DB_PASSWORD
+              value: {{ .Values.database.mysql.password | quote }}
+            - name: DB_MAX_CONNECTIONS
+              value: {{ .Values.database.mysql.maxConnections | quote }}
+            {{- end }}
+            
+            # OIDC configuration
+            {{- if and .Values.security.enabled .Values.oidc.enabled }}
+            - name: OIDC_DISCOVERY_URL
+              value: {{ .Values.oidc.discoveryUrl | quote }}
+            - name: OIDC_CLIENT_ID
+              value: {{ .Values.oidc.clientId | quote }}
+            - name: OIDC_CLIENT_SECRET
+              value: {{ .Values.oidc.clientSecret | quote }}
+            {{- end }}
+            
+            # SSL configuration
+            {{- if .Values.security.enabled }}
+            - name: KEYSTORE_PASSWORD
+              value: {{ .Values.security.keystore.password | quote }}
+            - name: TRUSTSTORE_PASSWORD
+              value: {{ .Values.security.truststore.password | quote }}
+            - name: KEY_PASSWORD
+              value: {{ .Values.security.keystore.password | quote }}
+            {{- end }}
+            
+            # JVM configuration
+            - name: NIFI_REGISTRY_JVM_HEAP_SIZE
               value: {{ .Values.nifiRegistry.jvm.heapSize | quote }}
+              
+          {{- if .Values.security.enabled }}
+          livenessProbe:
+            tcpSocket:
+              port: https
+            initialDelaySeconds: 180
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            tcpSocket:
+              port: https
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          {{- else }}
           livenessProbe:
             httpGet:
-              path: /nifi-registry
-              port: {{- if .Values.security.enabled }} https {{- else }} http {{- end }}
-              scheme: {{ if .Values.security.enabled }}HTTPS{{ else }}HTTP{{ end }}
+              path: /nifi-registry/
+              port: http
+              scheme: HTTP
             initialDelaySeconds: 120
             periodSeconds: 30
             timeoutSeconds: 10
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /nifi-registry
-              port: {{- if .Values.security.enabled }} https {{- else }} http {{- end }}
-              scheme: {{ if .Values.security.enabled }}HTTPS{{ else }}HTTP{{ end }}
+              path: /nifi-registry/
+              port: http
+              scheme: HTTP
             initialDelaySeconds: 60
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
+          {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
             - name: data
               mountPath: /opt/nifi-registry/nifi-registry-current/database
-            {{- if .Values.nifiRegistry.properties }}
-            - name: config-storage
-              mountPath: /opt/nifi-registry/nifi-registry-current/conf
-            {{- end }}
+            - name: scripts
+              mountPath: /scripts
             {{- if .Values.security.enabled }}
-            {{- if .Values.security.keystore.secretName }}
-            - name: keystore
-              mountPath: /opt/nifi-registry/nifi-registry-current/conf/keystore.jks
-              subPath: {{ .Values.security.keystore.keystoreKey }}
-              readOnly: true
+            - name: cert-storage
+              mountPath: /opt/nifi-registry/certs
+            {{- if .Values.oidc.enabled }}
+            - name: authorizers-config
+              mountPath: /opt/nifi-registry/nifi-registry-current/conf-default/authorizers.xml
+              subPath: authorizers.xml
             {{- end }}
-            {{- if .Values.security.truststore.secretName }}
-            - name: truststore
-              mountPath: /opt/nifi-registry/nifi-registry-current/conf/truststore.jks
-              subPath: {{ .Values.security.truststore.truststoreKey }}
-              readOnly: true
             {{- end }}
+            {{- with .Values.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
             {{- end }}
       volumes:
-        {{- if .Values.nifiRegistry.properties }}
-        - name: config
+        - name: scripts
           configMap:
-            name: {{ include "nifi-registry.fullname" . }}
-        - name: config-storage
+            name: {{ include "nifi-registry.fullname" . }}-scripts
+            defaultMode: 0755
+        {{- if .Values.security.enabled }}
+        - name: cert-storage
           emptyDir: {}
+        {{- if eq .Values.security.certificates.strategy "manual" }}
+        {{- if .Values.security.certificates.manual.keystoreSecret }}
+        - name: manual-keystore
+          secret:
+            secretName: {{ .Values.security.certificates.manual.keystoreSecret }}
+        {{- end }}
+        {{- if .Values.security.certificates.manual.truststoreSecret }}
+        - name: manual-truststore
+          secret:
+            secretName: {{ .Values.security.certificates.manual.truststoreSecret }}
+        {{- end }}
+        {{- end }}
+        {{- if .Values.oidc.enabled }}
+        - name: authorizers-config
+          configMap:
+            name: {{ include "nifi-registry.fullname" . }}-authorizers
+        {{- end }}
         {{- end }}
         {{- if not .Values.persistence.enabled }}
         - name: data
           emptyDir: {}
         {{- end }}
-        {{- if .Values.security.enabled }}
-        {{- if .Values.security.keystore.secretName }}
-        - name: keystore
-          secret:
-            secretName: {{ .Values.security.keystore.secretName }}
-        {{- end }}
-        {{- if .Values.security.truststore.secretName }}
-        - name: truststore
-          secret:
-            secretName: {{ .Values.security.truststore.secretName }}
-        {{- end }}
+        {{- with .Values.volumes }}
+        {{- toYaml . | nindent 8 }}
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
@@ -171,13 +318,15 @@ spec:
   volumeClaimTemplates:
     - metadata:
         name: data
-        labels:
-          {{- include "nifi-registry.labels" . | nindent 10 }}
       spec:
-        accessModes:
-          - ReadWriteOnce
+        accessModes: 
+          - {{ .Values.persistence.accessMode }}
         {{- if .Values.persistence.storageClass }}
+        {{- if (eq "-" .Values.persistence.storageClass) }}
+        storageClassName: ""
+        {{- else }}
         storageClassName: {{ .Values.persistence.storageClass }}
+        {{- end }}
         {{- end }}
         resources:
           requests:

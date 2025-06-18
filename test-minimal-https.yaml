@@ -1,0 +1,34 @@
+# Minimal HTTPS test configuration for debugging
+# Using all defaults except reduced resources for faster testing
+
+# Keep security defaults (HTTPS enabled)
+security:
+  enabled: true
+  certificates:
+    strategy: auto
+
+# Disable OIDC for now to isolate SSL issues
+oidc:
+  enabled: false
+
+# Use H2 database (default)
+database:
+  type: h2
+
+# Smaller resources for faster startup
+resources:
+  limits:
+    cpu: 500m
+    memory: 1Gi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+# Smaller storage for testing
+persistence:
+  enabled: true
+  size: 1Gi
+
+# Service for easy access
+service:
+  type: NodePort 

@@ -11,15 +11,16 @@ metadata:
 spec:
   type: {{ .Values.service.type }}
   ports:
-    - port: {{ .Values.service.port }}
-      targetPort: {{ .Values.nifiRegistry.web.httpPort }}
-      protocol: TCP
-      name: http
     {{- if .Values.security.enabled }}
-    - port: {{ .Values.nifiRegistry.web.httpsPort }}
+    - port: {{ .Values.service.port }}
       targetPort: {{ .Values.nifiRegistry.web.httpsPort }}
       protocol: TCP
       name: https
+    {{- else }}
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.nifiRegistry.web.httpPort | default 18080 }}
+      protocol: TCP
+      name: http
     {{- end }}
   selector:
     {{- include "nifi-registry.selectorLabels" . | nindent 4 }}
@@ -34,15 +35,16 @@ spec:
   type: ClusterIP
   clusterIP: None
   ports:
-    - port: {{ .Values.service.port }}
-      targetPort: {{ .Values.nifiRegistry.web.httpPort }}
-      protocol: TCP
-      name: http
     {{- if .Values.security.enabled }}
-    - port: {{ .Values.nifiRegistry.web.httpsPort }}
+    - port: {{ .Values.service.port }}
       targetPort: {{ .Values.nifiRegistry.web.httpsPort }}
       protocol: TCP
       name: https
+    {{- else }}
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.nifiRegistry.web.httpPort | default 18080 }}
+      protocol: TCP
+      name: http
     {{- end }}
   selector:
     {{- include "nifi-registry.selectorLabels" . | nindent 4 }}

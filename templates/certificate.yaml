@@ -1,0 +1,39 @@
+{{- if and .Values.security.enabled (eq .Values.security.certificates.strategy "cert-manager") }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "nifi-registry.fullname" . }}-tls
+  labels:
+    {{- include "nifi-registry.labels" . | nindent 4 }}
+spec:
+  secretName: {{ include "nifi-registry.fullname" . }}-certs
+  commonName: {{ include "nifi-registry.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local
+  dnsNames:
+  - {{ include "nifi-registry.fullname" . }}
+  - {{ include "nifi-registry.fullname" . }}.{{ .Release.Namespace }}
+  - {{ include "nifi-registry.fullname" . }}.{{ .Release.Namespace }}.svc
+  - {{ include "nifi-registry.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local
+  - localhost
+  ipAddresses:
+  - 127.0.0.1
+  issuerRef:
+    {{- toYaml .Values.security.certificates.certManager.issuerRef | nindent 4 }}
+  keystores:
+    jks:
+      create: true
+      passwordSecretRef:
+        name: {{ include "nifi-registry.fullname" . }}-keystore-password
+        key: password
+{{- end }}
+---
+{{- if and .Values.security.enabled (eq .Values.security.certificates.strategy "cert-manager") }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "nifi-registry.fullname" . }}-keystore-password
+  labels:
+    {{- include "nifi-registry.labels" . | nindent 4 }}
+type: Opaque
+data:
+  password: {{ .Values.security.keystore.password | b64enc }}
+{{- end }} 

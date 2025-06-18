@@ -1,0 +1,44 @@
+# Test values for legacy HTTP deployment (NOT RECOMMENDED)
+# This shows how to disable the new security defaults
+
+# Explicitly disable security for HTTP access
+security:
+  enabled: false
+
+# Disable OIDC when security is disabled
+oidc:
+  enabled: false
+
+# Override NiFi Registry web configuration for HTTP
+nifiRegistry:
+  web:
+    httpPort: 18080
+    httpsPort: ""
+
+# Service configuration for HTTP
+service:
+  port: 18080
+
+# Basic H2 database
+database:
+  type: h2
+
+# Environment overrides for HTTP
+environment:
+  NIFI_REGISTRY_WEB_HTTP_HOST: ""
+  NIFI_REGISTRY_WEB_HTTP_PORT: "18080"
+  NIFI_REGISTRY_WEB_HTTPS_HOST: ""
+  NIFI_REGISTRY_WEB_HTTPS_PORT: ""
+
+# Warning annotation
+podAnnotations:
+  warning: "This deployment uses HTTP without authentication - NOT RECOMMENDED for production"
+
+# Minimal resources for testing
+resources:
+  limits:
+    cpu: 250m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 256Mi 

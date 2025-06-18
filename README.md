@@ -1,226 +1,327 @@
-# Apache NiFi Registry Helm Chart
+# NiFi Registry Helm Chart
 
-A production-ready Helm chart for deploying Apache NiFi Registry 2.4.0 on Kubernetes.
+A production-ready Helm chart for Apache NiFi Registry with **HTTPS and OIDC authentication enabled by default**.
+
+## ⚠️ Breaking Changes in v2.0.0
+
+**This is a BREAKING CHANGE from previous versions:**
+
+- **HTTPS is now enabled by default** (previously HTTP)
+- **OIDC authentication is enabled by default** (previously no authentication)
+- **Auto-generated certificates** are created automatically
+- **Script-based configuration** replaces property file mounting
+
+### Migration from v1.x
+
+If you need HTTP access (not recommended), see [Legacy HTTP Configuration](#legacy-http-configuration).
 
 ## Features
 
-- ✅ **StatefulSet deployment** with persistent storage
-- ✅ **Configurable database backends** (H2, PostgreSQL, MySQL)
-- ✅ **SSL/TLS support** with keystore and truststore configuration
-- ✅ **Security contexts** and pod security policies
-- ✅ **Health checks** (readiness and liveness probes)
-- ✅ **Service Account** with configurable RBAC
-- ✅ **Ingress support** with TLS termination
-- ✅ **Flexible configuration** via ConfigMap
-- ✅ **Production-ready defaults** with resource limits
+✅ **Security by default**: HTTPS with auto-generated certificates  
+✅ **OIDC authentication**: Enterprise-ready authentication  
+✅ **Multiple certificate strategies**: Auto, cert-manager, or manual  
+✅ **Script-based configuration**: Dynamic property management  
+✅ **Multiple databases**: H2, PostgreSQL, MySQL support  
+✅ **Production ready**: Health checks, security contexts, persistence  
+✅ **Kubernetes native**: StatefulSet, Services, Ingress, RBAC  
 
 ## Quick Start
 
-### Prerequisites
-
-- Kubernetes 1.19+
-- Helm 3.x
-- Persistent Volume provisioner support in the underlying infrastructure
-
-### Installation
+### 1. Basic Secure Deployment (HTTPS + Self-signed certificates)
 
 ```bash
-# Add the repository (if published to a Helm repository)
-# helm repo add nifi-registry https://your-repo-url
-# helm repo update
-
-# Install with default configuration (H2 database)
-helm install my-nifi-registry . --namespace nifi-registry --create-namespace
-
-# Install with custom values
-helm install my-nifi-registry . --namespace nifi-registry --create-namespace -f my-values.yaml
+helm install nifi-registry ./nifi-registry
 ```
 
-### Access the Application
+This creates a secure deployment with:
+- HTTPS enabled with auto-generated self-signed certificates
+- OIDC authentication enabled (requires configuration)
+- H2 database for data persistence
+
+### 2. Configure OIDC Authentication
+
+Update your values to add your OIDC provider:
+
+```yaml
+oidc:
+  enabled: true
+  discoveryUrl: "https://your-oidc-provider.com/.well-known/openid_configuration"
+  clientId: "nifi-registry"
+  clientSecret: "your-client-secret"
+```
+
+### 3. Access the Application
 
 ```bash
-# Using kubectl proxy (recommended)
-kubectl proxy --port=8080 &
-# Open: http://localhost:8080/api/v1/namespaces/nifi-registry/services/my-nifi-registry:18080/proxy/nifi-registry/
+# Port forward to access the application
+kubectl port-forward svc/nifi-registry 18443:18443
 
-# Using port forwarding
-kubectl port-forward -n nifi-registry svc/my-nifi-registry 18080:18080
-# Open: http://localhost:18080/nifi-registry/
+# Visit https://localhost:18443/nifi-registry
+# Accept the self-signed certificate warning
 ```
 
 ## Configuration
 
-### Basic Configuration
+### Certificate Management
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `replicaCount` | Number of replicas | `1` |
-| `image.repository` | Image repository | `apache/nifi-registry` |
-| `image.tag` | Image tag | `2.4.0` |
-| `image.pullPolicy` | Image pull policy | `IfNotPresent` |
-| `service.type` | Service type | `ClusterIP` |
-| `service.port` | Service port | `18080` |
-| `persistence.enabled` | Enable persistent storage | `true` |
-| `persistence.size` | Storage size | `5Gi` |
+The chart supports three certificate strategies:
 
-### Database Configuration
-
-#### Default H2 Database
-```yaml
-# No additional configuration needed - works out of the box
-```
-
-#### PostgreSQL Database
-```yaml
-nifiRegistry:
-  properties:
-    "nifi.registry.db.url": "jdbc:postgresql://postgres:5432/nifiregistry"
-    "nifi.registry.db.driver.class": "org.postgresql.Driver"
-    "nifi.registry.db.username": "nifiregistry"
-    "nifi.registry.db.password": "password"
-```
-
-### SSL/TLS Configuration
+#### 1. Auto-Generated Certificates (Default)
 
 ```yaml
 security:
   enabled: true
-  keystore:
-    secretName: "nifi-registry-keystore"
-    keystoreKey: "keystore.jks"
-    type: "JKS"
-  truststore:
-    secretName: "nifi-registry-truststore"
-    truststoreKey: "truststore.jks"
-    type: "JKS"
+  certificates:
+    strategy: auto
 ```
 
-### Ingress Configuration
+Creates self-signed certificates automatically. Perfect for development and testing.
+
+#### 2. Cert-Manager Integration
 
 ```yaml
+security:
+  enabled: true
+  certificates:
+    strategy: cert-manager
+    certManager:
+      issuerRef:
+        name: letsencrypt-prod
+        kind: ClusterIssuer
+```
+
+Requires [cert-manager](https://cert-manager.io/) to be installed. Best for production with proper CA.
+
+#### 3. Manual Certificates
+
+```yaml
+security:
+  enabled: true
+  certificates:
+    strategy: manual
+    manual:
+      keystoreSecret: "my-keystore-secret"
+      truststoreSecret: "my-truststore-secret"
+```
+
+Use your own certificates stored in Kubernetes secrets.
+
+### OIDC Authentication
+
+Configure your OIDC provider:
+
+```yaml
+oidc:
+  enabled: true
+  discoveryUrl: "https://keycloak.example.com/realms/nifi/.well-known/openid_configuration"
+  clientId: "nifi-registry"
+  clientSecret: "your-secret"
+  claimIdentifyingUser: "preferred_username"  # or "email"
+  additionalScopes: "groups"
+```
+
+### Database Configuration
+
+#### H2 Database (Default)
+
+```yaml
+database:
+  type: h2
+```
+
+#### PostgreSQL
+
+```yaml
+database:
+  type: postgresql
+  postgresql:
+    host: "postgres.example.com"
+    port: 5432
+    database: "nifi_registry"
+    username: "nifi_user"
+    password: "secure-password"
+    maxConnections: 10
+```
+
+#### MySQL
+
+```yaml
+database:
+  type: mysql
+  mysql:
+    host: "mysql.example.com"
+    port: 3306
+    database: "nifi_registry"
+    username: "nifi_user"
+    password: "secure-password"
+    maxConnections: 10
+```
+
+### Legacy HTTP Configuration
+
+**⚠️ Not recommended for production**
+
+To disable HTTPS and use HTTP (legacy behavior):
+
+```yaml
+security:
+  enabled: false
+
+oidc:
+  enabled: false
+
+nifiRegistry:
+  web:
+    httpPort: 18080
+    httpsPort: ""
+
+service:
+  port: 18080
+
+environment:
+  NIFI_REGISTRY_WEB_HTTP_PORT: "18080"
+  NIFI_REGISTRY_WEB_HTTPS_PORT: ""
+```
+
+## Production Deployment Example
+
+```yaml
+# Production values
+security:
+  enabled: true
+  certificates:
+    strategy: cert-manager
+    certManager:
+      issuerRef:
+        name: letsencrypt-prod
+        kind: ClusterIssuer
+
+oidc:
+  enabled: true
+  discoveryUrl: "https://auth.company.com/.well-known/openid_configuration"
+  clientId: "nifi-registry-prod"
+  clientSecret: "production-secret"
+
+database:
+  type: postgresql
+  postgresql:
+    host: "postgres-prod.company.com"
+    database: "nifi_registry_prod"
+    username: "nifi_user"
+    password: "production-password"
+
 ingress:
   enabled: true
   className: "nginx"
   annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
   hosts:
-    - host: nifi-registry.example.com
+    - host: nifi-registry.company.com
       paths:
         - path: /
           pathType: Prefix
   tls:
     - secretName: nifi-registry-tls
       hosts:
-        - nifi-registry.example.com
+        - nifi-registry.company.com
+
+resources:
+  limits:
+    cpu: 2
+    memory: 4Gi
+  requests:
+    cpu: 1
+    memory: 2Gi
+
+persistence:
+  enabled: true
+  size: 50Gi
+  storageClass: "fast-ssd"
+
+replicaCount: 3
 ```
+
+## Values Reference
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `security.enabled` | Enable HTTPS and SSL/TLS | `true` |
+| `security.certificates.strategy` | Certificate management strategy: `auto`, `cert-manager`, `manual` | `auto` |
+| `oidc.enabled` | Enable OIDC authentication | `true` |
+| `oidc.discoveryUrl` | OIDC provider discovery URL | `""` |
+| `oidc.clientId` | OIDC client ID | `"nifi-registry"` |
+| `oidc.clientSecret` | OIDC client secret | `""` |
+| `database.type` | Database type: `h2`, `postgresql`, `mysql` | `h2` |
+| `service.port` | Service port | `18443` |
+| `persistence.enabled` | Enable persistent volume | `true` |
+| `persistence.size` | Persistent volume size | `8Gi` |
+
+For a complete list of configuration options, see [values.yaml](values.yaml).
 
 ## Testing
 
-See [TESTING.md](TESTING.md) for comprehensive testing procedures including:
-- Basic H2 deployment testing
-- PostgreSQL integration testing
-- SSL/TLS configuration testing
-- Automated testing scripts
-
-## Examples
-
-Example configuration files are provided in the repository:
-
-- `test-values-simple.yaml` - Basic H2 configuration
-- `test-values-postgres.yaml` - PostgreSQL configuration
-- `test-values-minimal.yaml` - Minimal configuration
-
-## SSL Certificate Generation
-
-Generate self-signed certificates for testing:
+Test different configurations:
 
 ```bash
-cd ssl-certs
-./create-ssl-certs.sh
+# Test secure deployment with auto-generated certificates
+helm install test-secure ./nifi-registry -f test-values-secure.yaml
+
+# Test cert-manager integration
+helm install test-certmgr ./nifi-registry -f test-values-cert-manager.yaml
+
+# Test legacy HTTP (not recommended)
+helm install test-http ./nifi-registry -f test-values-legacy-http.yaml
 ```
-
-## Architecture
-
-```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│     Ingress     │────│     Service      │────│   StatefulSet   │
-│  (optional)     │    │   (ClusterIP)    │    │  (nifi-registry)│
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-                                                        │
-                       ┌──────────────────┐            │
-                       │   ConfigMap      │────────────┘
-                       │ (configuration)  │
-                       └──────────────────┘
-                                                        │
-                       ┌──────────────────┐            │
-                       │ PersistentVolume │────────────┘
-                       │   (database)     │
-                       └──────────────────┘
-```
-
-## Production Considerations
-
-1. **Database**: Use external PostgreSQL/MySQL for production
-2. **SSL/TLS**: Use proper certificates from a Certificate Authority
-3. **Storage**: Configure appropriate storage class and size
-4. **Resources**: Adjust CPU/memory based on workload
-5. **Ingress**: Configure ingress for external access
-6. **Monitoring**: Add monitoring and logging
-7. **Backup**: Implement database backup strategy
-8. **High Availability**: Consider multiple replicas with shared storage
 
 ## Troubleshooting
 
-### Common Issues
+### Certificate Issues
 
-1. **Pod not starting**: Check logs with `kubectl logs <pod-name>`
-2. **Database connection**: Verify database connectivity and credentials
-3. **SSL issues**: Ensure certificates are valid and properly mounted
-4. **Storage issues**: Check PVC status and storage class
+Check certificate generation:
 
-### Debug Commands
+```bash
+# Check cert generation job
+kubectl get jobs
+kubectl logs job/nifi-registry-cert-gen
+
+# Check certificate secret
+kubectl get secret nifi-registry-certs -o yaml
+```
+
+### OIDC Authentication Issues
+
+1. Verify OIDC discovery URL is accessible
+2. Check client ID and secret configuration
+3. Review application logs for authentication errors
+
+```bash
+kubectl logs statefulset/nifi-registry
+```
+
+### Health Check Failures
+
+For HTTPS deployments, health checks use HTTPS scheme. If certificates are invalid, health checks may fail:
 
 ```bash
 # Check pod status
-kubectl get pods -n nifi-registry
+kubectl get pods
+kubectl describe pod nifi-registry-0
 
-# View pod logs
-kubectl logs -n nifi-registry <pod-name>
-
-# Describe pod for events
-kubectl describe pod -n nifi-registry <pod-name>
-
-# Test internal connectivity
-kubectl run curl-test --image=curlimages/curl --rm -it --restart=Never \
-  --namespace=nifi-registry -- curl http://my-nifi-registry:18080/nifi-registry/
+# Check application logs
+kubectl logs nifi-registry-0
 ```
 
 ## Contributing
 
 1. Fork the repository
 2. Create a feature branch
-3. Make your changes
-4. Test thoroughly using the provided testing procedures
-5. Submit a pull request
+3. Make changes and test with `helm lint` and `helm template`
+4. Submit a pull request
 
 ## License
 
-This Helm chart is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
+This chart is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
 
-Apache NiFi Registry is licensed under the Apache License 2.0.
-
-## Support
-
-For issues related to:
-- **This Helm chart**: Open an issue in this repository
-- **Apache NiFi Registry**: Visit the [official Apache NiFi documentation](https://nifi.apache.org/docs.html)
-
-## Changelog
-
-### v1.0.0
-- Initial release
-- Support for Apache NiFi Registry 2.4.0
-- H2 and PostgreSQL database support
-- SSL/TLS configuration
-- Ingress support
-- Production-ready defaults 
+Apache NiFi Registry is a trademark of The Apache Software Foundation. 

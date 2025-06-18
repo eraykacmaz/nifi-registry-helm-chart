@@ -1,0 +1,67 @@
+# Test values for cert-manager certificate strategy
+# Requires cert-manager to be installed in the cluster
+
+security:
+  enabled: true
+  certificates:
+    strategy: cert-manager
+    certManager:
+      issuerRef:
+        name: letsencrypt-prod
+        kind: ClusterIssuer
+
+# OIDC configuration for production
+oidc:
+  enabled: true
+  discoveryUrl: "https://auth.example.com/realms/nifi/.well-known/openid_configuration"
+  clientId: "nifi-registry"
+  clientSecret: "production-client-secret"
+  claimIdentifyingUser: "preferred_username"
+  additionalScopes: "groups"
+
+# Use PostgreSQL for production
+database:
+  type: postgresql
+  postgresql:
+    host: "postgres.example.com"
+    port: 5432
+    database: "nifi_registry_prod"
+    username: "nifi_user"
+    password: "secure-password"
+    maxConnections: 20
+
+# Production ingress with real domain
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+  hosts:
+    - host: nifi-registry.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: nifi-registry-tls
+      hosts:
+        - nifi-registry.example.com
+
+# Production resources
+resources:
+  limits:
+    cpu: 2
+    memory: 4Gi
+  requests:
+    cpu: 1
+    memory: 2Gi
+
+# Production persistence
+persistence:
+  enabled: true
+  size: 20Gi
+  storageClass: "fast-ssd"
+
+# High availability
+replicaCount: 3 

@@ -1,0 +1,376 @@
+---
+# Source: nifi-registry/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: test-https-nifi-registry
+  labels:
+    helm.sh/chart: nifi-registry-1.0.0
+    app.kubernetes.io/name: nifi-registry
+    app.kubernetes.io/instance: test-https
+    app.kubernetes.io/version: "2.4.0"
+    app.kubernetes.io/managed-by: Helm
+---
+# Source: nifi-registry/templates/oidc-configs-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-https-nifi-registry-oidc-config
+  labels:
+    helm.sh/chart: nifi-registry-1.0.0
+    app.kubernetes.io/name: nifi-registry
+    app.kubernetes.io/instance: test-https
+    app.kubernetes.io/version: "2.4.0"
+    app.kubernetes.io/managed-by: Helm
+data:
+  authorizers.xml: |
+    <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    <authorizers>
+        <userGroupProvider>
+            <identifier>file-user-group-provider</identifier>
+            <class>org.apache.nifi.registry.security.authorization.file.FileUserGroupProvider</class>
+            <property name="Users File">./conf/users.xml</property>
+            <property name="Legacy Authorized Users File"></property>
+            <property name="Initial User Identity 1">email=admin@example.com</property>
+        </userGroupProvider>
+
+        <accessPolicyProvider>
+            <identifier>file-access-policy-provider</identifier>
+            <class>org.apache.nifi.registry.security.authorization.file.FileAccessPolicyProvider</class>
+            <property name="User Group Provider">file-user-group-provider</property>
+            <property name="Authorizations File">./conf/authorizations.xml</property>
+            <property name="Initial Admin Identity">admin@example.com</property>
+            <property name="Legacy Authorized Users File"></property>
+            <property name="Node Identity 1"></property>
+        </accessPolicyProvider>
+
+        <authorizer>
+            <identifier>managed-authorizer</identifier>
+            <class>org.apache.nifi.registry.security.authorization.StandardManagedAuthorizer</class>
+            <property name="Access Policy Provider">file-access-policy-provider</property>
+        </authorizer>
+    </authorizers>
+
+  identity-providers.xml: |
+    <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    <identityProviders>
+        <!-- OIDC provider configuration incomplete - discoveryUrl is required -->
+        <provider>
+            <identifier>oidc-provider</identifier>
+            <class>org.apache.nifi.registry.security.identity.oidc.StandardOidcIdentityProvider</class>
+            <!-- Please configure OIDC settings in values.yaml -->
+        </provider>
+    </identityProviders>
+---
+# Source: nifi-registry/templates/start-script-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-https-nifi-registry-start-script
+  labels:
+    helm.sh/chart: nifi-registry-1.0.0
+    app.kubernetes.io/name: nifi-registry
+    app.kubernetes.io/instance: test-https
+    app.kubernetes.io/version: "2.4.0"
+    app.kubernetes.io/managed-by: Helm
+data:
+  start.sh: |
+    #!/bin/bash
+    set -e
+    
+    echo "Starting NiFi Registry with custom configuration..."
+    
+    # Set up directories
+    NIFI_REGISTRY_HOME="/opt/nifi-registry/nifi-registry-current"
+    CONF_DIR="${NIFI_REGISTRY_HOME}/conf"
+    CONF_ORIG_DIR="${NIFI_REGISTRY_HOME}/conf.orig"
+    
+    # First time setup: copy original configuration to conf.orig
+    if [ ! -f "${CONF_ORIG_DIR}/nifi-registry.properties" ]; then
+        echo "Setting up original configuration backup..."
+        mkdir -p "${CONF_ORIG_DIR}"
+        # Copy from the original location in the Docker image
+        cp -r "${NIFI_REGISTRY_HOME}/conf"/* "${CONF_ORIG_DIR}/"
+    fi
+    
+    # Always start fresh with original configuration
+    echo "Copying original configuration files to working directory..."
+    cp -r "${CONF_ORIG_DIR}"/* "${CONF_DIR}/"
+    
+    # Function to update or add property in nifi-registry.properties
+    update_property() {
+        local key="$1"
+        local value="$2"
+        local file="${CONF_DIR}/nifi-registry.properties"
+        
+        if grep -q "^${key}=" "$file"; then
+            # Property exists, update it
+            sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+        else
+            # Property doesn't exist, add it
+            echo "${key}=${value}" >> "$file"
+        fi
+    }
+    
+    # Configure web properties based on security settings
+    echo "Configuring HTTPS..."
+    update_property "nifi.registry.web.https.host" ""
+    update_property "nifi.registry.web.https.port" "18443"
+    update_property "nifi.registry.web.http.host" ""
+    update_property "nifi.registry.web.http.port" ""
+    
+    # SSL/TLS Configuration
+    echo "Setting up auto-generated certificates..."
+    update_property "nifi.registry.security.keystore" "${CONF_DIR}/keystore.jks"
+    update_property "nifi.registry.security.keystoreType" "JKS"
+    update_property "nifi.registry.security.keystorePasswd" "changeit"
+    update_property "nifi.registry.security.keyPasswd" "changeit"
+    update_property "nifi.registry.security.truststore" "${CONF_DIR}/truststore.jks"
+    update_property "nifi.registry.security.truststoreType" "JKS"
+    update_property "nifi.registry.security.truststorePasswd" "changeit"
+    
+    # Configure authorizers for OIDC
+    echo "Enabling OIDC authentication..."
+    update_property "nifi.registry.security.authorizers.configuration.file" "./conf/authorizers.xml"
+    update_property "nifi.registry.security.authorizer" "managed-authorizer"
+    update_property "nifi.registry.security.identity.providers.configuration.file" "./conf/identity-providers.xml"
+    update_property "nifi.registry.security.identity.provider" "oidc-provider"
+    
+    # Copy OIDC configuration files
+    if [ -f "/opt/nifi-registry/oidc-config/authorizers.xml" ]; then
+        cp "/opt/nifi-registry/oidc-config/authorizers.xml" "${CONF_DIR}/authorizers.xml"
+    fi
+    if [ -f "/opt/nifi-registry/oidc-config/identity-providers.xml" ]; then
+        cp "/opt/nifi-registry/oidc-config/identity-providers.xml" "${CONF_DIR}/identity-providers.xml"
+    fi
+    
+    # Configure database
+    echo "Using default H2 database..."
+    update_property "nifi.registry.db.url" "jdbc:h2:./database/nifi-registry-primary;AUTOCOMMIT=OFF;DB_CLOSE_ON_EXIT=FALSE;LOCK_MODE=3;LOCK_TIMEOUT=25000;WRITE_DELAY=0;AUTO_SERVER=FALSE"
+    update_property "nifi.registry.db.driver.class" "org.h2.Driver"
+    update_property "nifi.registry.db.username" "nifireg"
+    update_property "nifi.registry.db.password" "nifireg"
+    
+    # Configure OIDC properties
+    update_property "nifi.registry.security.user.oidc.connect.timeout" "5 secs"
+    update_property "nifi.registry.security.user.oidc.read.timeout" "5 secs"
+    update_property "nifi.registry.security.user.oidc.client.id" "nifi-registry"
+    update_property "nifi.registry.security.user.oidc.preferred.jwsalgorithm" "RS256"
+    update_property "nifi.registry.security.user.oidc.claim.identifying.user" "email"
+    update_property "nifi.registry.security.user.oidc.fallback.claims.identifying.user" "sub"
+    
+    # Apply custom properties
+    
+    # Set JVM heap size
+    export NIFI_REGISTRY_JVM_HEAP_INIT="1g"
+    export NIFI_REGISTRY_JVM_HEAP_MAX="1g"
+    # Generate self-signed certificates if they don't exist
+    if [ ! -f "${CONF_DIR}/keystore.jks" ]; then
+        echo "Generating self-signed certificates..."
+        
+        # Generate private key and certificate
+        keytool -genkeypair \
+            -alias nifi-registry \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 365 \
+            -keystore "${CONF_DIR}/keystore.jks" \
+            -storepass changeit \
+            -keypass changeit \
+            -dname "CN=$(hostname -f), OU=NiFi Registry, O=Apache, L=Unknown, ST=Unknown, C=US" \
+            -ext "SAN=DNS:$(hostname -f),DNS:localhost,IP:127.0.0.1"
+        
+        # Export certificate and create truststore
+        keytool -exportcert \
+            -alias nifi-registry \
+            -keystore "${CONF_DIR}/keystore.jks" \
+            -storepass changeit \
+            -file "${CONF_DIR}/nifi-registry.crt"
+        
+        keytool -importcert \
+            -alias nifi-registry \
+            -file "${CONF_DIR}/nifi-registry.crt" \
+            -keystore "${CONF_DIR}/truststore.jks" \
+            -storepass changeit \
+            -noprompt
+        
+        echo "Self-signed certificates generated successfully."
+    fi
+    
+    echo "Configuration complete. Starting NiFi Registry..."
+    
+    # Start NiFi Registry
+    exec "${NIFI_REGISTRY_HOME}/bin/nifi-registry.sh" run
+---
+# Source: nifi-registry/templates/service-headless.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-https-nifi-registry-headless
+  labels:
+    helm.sh/chart: nifi-registry-1.0.0
+    app.kubernetes.io/name: nifi-registry
+    app.kubernetes.io/instance: test-https
+    app.kubernetes.io/version: "2.4.0"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    service.alpha.kubernetes.io/tolerate-unready-endpoints: "true"
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - port: 18443
+      targetPort: https
+      protocol: TCP
+      name: https
+  selector:
+    app.kubernetes.io/name: nifi-registry
+    app.kubernetes.io/instance: test-https
+---
+# Source: nifi-registry/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-https-nifi-registry
+  labels:
+    helm.sh/chart: nifi-registry-1.0.0
+    app.kubernetes.io/name: nifi-registry
+    app.kubernetes.io/instance: test-https
+    app.kubernetes.io/version: "2.4.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  type: ClusterIP
+  ports:
+    - port: 18443
+      targetPort: https
+      protocol: TCP
+      name: https
+  selector:
+    app.kubernetes.io/name: nifi-registry
+    app.kubernetes.io/instance: test-https
+---
+# Source: nifi-registry/templates/statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: test-https-nifi-registry
+  labels:
+    helm.sh/chart: nifi-registry-1.0.0
+    app.kubernetes.io/name: nifi-registry
+    app.kubernetes.io/instance: test-https
+    app.kubernetes.io/version: "2.4.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nifi-registry
+      app.kubernetes.io/instance: test-https
+  serviceName: test-https-nifi-registry-headless
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: nifi-registry-1.0.0
+        app.kubernetes.io/name: nifi-registry
+        app.kubernetes.io/instance: test-https
+        app.kubernetes.io/version: "2.4.0"
+        app.kubernetes.io/managed-by: Helm
+    spec:
+      serviceAccountName: test-https-nifi-registry
+      securityContext:
+        fsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: nifi-registry
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: false
+            runAsNonRoot: true
+            runAsUser: 1000
+          image: "apache/nifi-registry:2.4.0"
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/bash
+            - /opt/nifi-registry/scripts/start.sh
+          ports:
+            - name: https
+              containerPort: 18443
+              protocol: TCP
+          env:
+            - name: NIFI_REGISTRY_JVM_HEAP_INIT
+              value: "1g"
+            - name: NIFI_REGISTRY_JVM_HEAP_MAX
+              value: "1g"
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /nifi-registry
+              port: https
+              scheme: HTTPS
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /nifi-registry
+              port: https
+              scheme: HTTPS
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            limits:
+              cpu: 1000m
+              memory: 2Gi
+            requests:
+              cpu: 500m
+              memory: 1Gi
+          volumeMounts:
+            # Mount the custom start script
+            - name: start-script
+              mountPath: /opt/nifi-registry/scripts
+              readOnly: true
+            # Mount data directory for persistence
+            - name: data
+              mountPath: /opt/nifi-registry/nifi-registry-current/database
+            # Mount conf directory for configuration files
+            - name: conf
+              mountPath: /opt/nifi-registry/nifi-registry-current/conf
+            # Mount original configuration as template
+            - name: conf-orig
+              mountPath: /opt/nifi-registry/nifi-registry-current/conf.orig
+              readOnly: true
+            # Mount OIDC configuration files
+            - name: oidc-config
+              mountPath: /opt/nifi-registry/oidc-config
+              readOnly: true
+      volumes:
+        # Custom start script
+        - name: start-script
+          configMap:
+            name: test-https-nifi-registry-start-script
+            defaultMode: 0755
+        # Original configuration files from the image
+        - name: conf-orig
+          emptyDir: {}
+        # Writable configuration directory
+        - name: conf
+          emptyDir: {}
+        # OIDC configuration
+        - name: oidc-config
+          configMap:
+            name: test-https-nifi-registry-oidc-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 5Gi
